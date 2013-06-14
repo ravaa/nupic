@@ -1,4 +1,3 @@
-#!/usr/bin/env bash
 # ----------------------------------------------------------------------
 # Numenta Platform for Intelligent Computing (NuPIC)
 # Copyright (C) 2013, Numenta, Inc.  Unless you have purchased from
@@ -20,21 +19,38 @@
 # http://numenta.org/licenses/
 # ----------------------------------------------------------------------
 
-# This script is intended to be sourced from your .bashrc to ensure the
-# environment is set up correctly for NuPIC. It requires $NTA to be set prior
-# to invocation as described in the README.
+## This file defines parameters for a prediction experiment.
 
-export PATH=$NTA/bin:$PATH
-export PYTHONPATH=$NTA/lib/python2.6/site-packages:$PYTHONPATH
-export NTA_ROOTDIR=$NTA
+import os
+from nupic.frameworks.opf.expdescriptionhelpers import importBaseDescription
 
-# Setup the OS dynamic library path to point to $NTA/lib. There are two
-# different paths to set: DYLD_LIBRARY_PATH on Mac and LD_LIBRARY_PATH on
-# Linux.
-LDIR="$NTA/lib"
-if [[ ! "$DYLD_LIBRARY_PATH" == "$LDIR" ]]; then
-  export DYLD_LIBRARY_PATH=$LDIR:$DYLD_LIBRARY_PATH
-fi
-if [[ ! "$LD_LIBRARY_PATH" == "$LDIR" ]]; then
-  export LD_LIBRARY_PATH=$LDIR:$LD_LIBRARY_PATH
-fi
+# the sub-experiment configuration
+config = \
+{ 
+  'dataSource': 'file://' + os.path.join(os.path.dirname(__file__), 
+                                         '../datasets/scalar_0.csv'),
+  'modelParams': { 
+    'sensorParams': { 
+      'verbosity': 0,
+      'encoders': { 
+        'field1': { 
+          'clipInput': True,
+          'fieldname': u'field1',
+          'maxval': 0.1,
+          'minval': 0.0,
+          'n': 11,
+          'name': u'field1',
+          'type': 'ScalarEncoder',
+          'w': 7
+          },
+       },
+    },
+    'clParams': { 
+      'clVerbosity': 0,
+      'implementation': 'py'
+    },
+  }
+}
+
+mod = importBaseDescription('../base/description.py', config)
+locals().update(mod.__dict__)
