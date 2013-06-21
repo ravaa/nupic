@@ -1,6 +1,6 @@
 branches:
   except:
-    - master
+    - gh-pages
 language: python
 compiler:
   - gcc
