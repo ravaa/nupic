@@ -1,0 +1,68 @@
+<!doctype html>
+<head>
+  <script src="//ajax.googleapis.com/ajax/libs/jquery/1.10.1/jquery.min.js"></script>
+  <script src="//ajax.googleapis.com/ajax/libs/jqueryui/1.10.3/jquery-ui.min.js"></script>
+  <link rel="stylesheet" href="http://code.jquery.com/ui/1.10.3/themes/smoothness/jquery-ui.css" />
+  <title>Predipic Sensor Sweep</title>  
+  <style>
+    .sensor-record { background: #00FFFF; }
+    .prediction-record { background: #CCFF99; }
+    body {
+    position: absolute;
+    margin: 0;
+    }
+    .row span {
+    display: inline-block;
+    width: 140px;
+    text-align: center;
+    }
+    span.different {
+    background-color: red;
+    }
+    #test-log {
+    position: absolute;
+    width: 300px;
+    left: 60%;
+    }
+    #sensor-record-table, #prediction-record-table {
+    width: 100px;
+    position: absolute;
+    display: block;
+    text-align: center;
+    }
+    #prediction-record-table {
+    background-color: #CCFF99;
+    left: 149px;
+    }
+    #sensor-record-table {
+    background-color: #00FFFF;
+    left: 0px;
+    }
+
+  </style>
+</head>
+
+
+<body id="body">
+  <div id="intro-header" name="intro">
+  <p align="left">Welcome to the predipic sensor sweep test.</p>
+  </div>
+
+  <div id="test-form" name="test-form">
+  <form action="/" method="post">
+    <input type="submit" value="Run Test">
+  </form>
+  </div>
+
+  <div id="test-log" name="test-log">
+    <div class="sensor-record-table">
+    {% for record in records %}
+    <div class="row">
+    <span class="sensor-record {% if record.active_sensor != record.prediction %}different{% endif %}">{{ record.active_sensor }}</span>
+    <span class="prediction-record {% if record.active_sensor != record.prediction %}different{% endif %}">{{ record.prediction }}</span>
+    </div>
+    {% endfor %}
+
+  </div>
+
+</body>
