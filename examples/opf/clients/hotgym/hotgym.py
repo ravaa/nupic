@@ -24,13 +24,35 @@
 
 import csv
 import datetime
+import logging
 
 from nupic.data.datasethelpers import findDataset
+from nupic.frameworks.opf.metrics import MetricSpec
 from nupic.frameworks.opf.modelfactory import ModelFactory
+from nupic.frameworks.opf.predictionmetricsmanager import MetricsManager
 
 import model_params
 
-DATA_PATH = "extra/hotgym/hotgym.csv"
+_LOGGER = logging.getLogger(__name__)
+
+_DATA_PATH = "extra/hotgym/rec-center-hourly.csv"
+
+_METRIC_SPECS = (
+    MetricSpec(field='consumption', metric='multiStep',
+               inferenceElement='multiStepBestPredictions',
+               params={'errorMetric': 'aae', 'window': 1000, 'steps': 1}),
+    MetricSpec(field='consumption', metric='trivial',
+               inferenceElement='prediction',
+               params={'errorMetric': 'aae', 'window': 1000, 'steps': 1}),
+    MetricSpec(field='consumption', metric='multiStep',
+               inferenceElement='multiStepBestPredictions',
+               params={'errorMetric': 'altMAPE', 'window': 1000, 'steps': 1}),
+    MetricSpec(field='consumption', metric='trivial',
+               inferenceElement='prediction',
+               params={'errorMetric': 'altMAPE', 'window': 1000, 'steps': 1}),
+)
+
+_NUM_RECORDS = 1000
 
 
 
@@ -41,25 +63,32 @@ def createModel():
 
 def runHotgym():
   model = createModel()
-  model.enableInference({'predictionSteps': [1, 5],
-                         'predictedField': 'consumption',
-                         'numRecords': 4000})
-  print findDataset(DATA_PATH)
-  with open (findDataset(DATA_PATH)) as fin:
+  model.enableInference({'predictedField': 'consumption'})
+  metricsManager = MetricsManager(_METRIC_SPECS, model.getFieldInfo(),
+                                  model.getInferenceType())
+  with open (findDataset(_DATA_PATH)) as fin:
     reader = csv.reader(fin)
     headers = reader.next()
-    print headers
-    print reader.next()
-    print reader.next()
-    for record in reader:
-      print record
+    reader.next()
+    reader.next()
+    for i, record in enumerate(reader, start=1):
       modelInput = dict(zip(headers, record))
       modelInput["consumption"] = float(modelInput["consumption"])
       modelInput["timestamp"] = datetime.datetime.strptime(
-          modelInput["timestamp"], "%Y-%m-%d %H:%M:%S.%f")
+          modelInput["timestamp"], "%m/%d/%y %H:%M")
       result = model.run(modelInput)
-      print result
+      result.metrics = metricsManager.update(result)
+      isLast = i == _NUM_RECORDS
+      if i % 100 == 0 or isLast:
+        _LOGGER.info("After %i records, 1-step altMAPE=%f", i,
+                    result.metrics["multiStepBestPredictions:multiStep:"
+                                   "errorMetric='altMAPE':steps=1:window=1000:"
+                                   "field=consumption"])
+      if isLast:
+        break
+
 
 
 if __name__ == "__main__":
+  logging.basicConfig(level=logging.INFO)
   runHotgym()

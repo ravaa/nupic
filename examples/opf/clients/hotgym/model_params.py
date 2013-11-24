@@ -1,3 +1,23 @@
+# ----------------------------------------------------------------------
+# Numenta Platform for Intelligent Computing (NuPIC)
+# Copyright (C) 2013, Numenta, Inc.  Unless you have purchased from
+# Numenta, Inc. a separate commercial license for this software code, the
+# following terms and conditions apply:
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License version 3 as
+# published by the Free Software Foundation.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+# See the GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see http://www.gnu.org/licenses.
+#
+# http://numenta.org/licenses/
+# ----------------------------------------------------------------------
 
 MODEL_PARAMS = {
     # Type of model that the rest of these parameters apply to.
@@ -78,6 +98,10 @@ MODEL_PARAMS = {
             # SP diagnostic output verbosity control;
             # 0: silent; >=1: some info; >=2: more info;
             'spVerbosity' : 0,
+
+	    # Spatial Pooler implementation selector, see getSPClass 
+	    # in py/regions/SPRegion.py for details
+	    'spatialImp' : 'cpp', # 'py', 'oldpy' (default), 'cpp' (speed optimized, new)
 
             'globalInhibition': 1,
 
@@ -221,15 +245,8 @@ MODEL_PARAMS = {
             # This is set after the call to updateConfigFromSubConfig and is
             # computed from the aggregationInfo and predictAheadTime.
             'steps': '1,5',
-            
-            
         },
 
         'trainSPNetOnlyIfRequested': False,
     },
-          
-  
-  'predictionSteps': [1, 5],
-  'predictedField': 'consumption',
-  'numRecords': 4000,
 }

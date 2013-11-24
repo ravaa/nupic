@@ -23,18 +23,23 @@ import numpy
 import sys
 import os
 
-from nupic.research import FDRCSpatial2
+from nupic.research.FDRCSpatial2 import FDRCSpatial2
+from nupic.research.flat_spatial_pooler import (
+    FlatSpatialPooler as PyFlatSpatialPooler)
+from nupic.bindings.algorithms import FlatSpatialPooler as CPPFlatSpatialPooler
 from nupic.research import TP, TPTrivial
 from nupic.research import TP10X2
 
 from nupic.support import getArgumentDescriptions
 
 from PyRegion import PyRegion
+from SPRegion import getDefaultSPImp, getSPClass
 
 from nupic.bindings.algorithms import FDRCSpatial as CPPSP
 from nupic.bindings.math import GetNTAReal
 
 gDefaultTemporalImp = 'py'
+
 
 ##############################################################################
 def _getTPClass(temporalImp):
@@ -110,7 +115,7 @@ def _buildArgs(f, self=None, kwargs={}):
   return argTuples
 
 
-def _getAdditionalSpecs(temporalImp, kwargs={}):
+def _getAdditionalSpecs(spatialImp, temporalImp, kwargs={}):
   """Build the additional specs in three groups (for the inspector)
 
   Use the type of the default argument to set the Spec type, defaulting
@@ -141,12 +146,11 @@ def _getAdditionalSpecs(temporalImp, kwargs={}):
     else:
       return ''
 
-  spatialSpec = {}
-  FDRSpatialClass = FDRCSpatial2.FDRCSpatial2
-  sArgTuples = _buildArgs(FDRSpatialClass.__init__)
-
+  FDRSpatialClass = getSPClass(spatialImp)
   FDRTemporalClass = _getTPClass(temporalImp)
 
+  spatialSpec = {}
+  sArgTuples = _buildArgs(FDRSpatialClass.__init__)
   tArgTuples = _buildArgs(FDRTemporalClass.__init__)
 
   for argTuple in sArgTuples:
@@ -243,14 +247,6 @@ def _getAdditionalSpecs(temporalImp, kwargs={}):
       dataType='Real32',
       count=0,
       constraints=''),
-
-    storeDenseOutput=dict(
-      description="""Whether to keep the dense coincidence output for each
-                     baby node (needed for denseOutput parameter).""",
-      accessMode='ReadWrite',
-      dataType='UInt32',
-      count=1,
-      constraints='bool'),
 
     outputCloningWidth=dict(
       description="""The number of columns you'd have to move horizontally
@@ -565,11 +561,12 @@ class CLARegion(PyRegion):
                trainingStep = 'temporal',
                cellsSavePath='',
                statelessMode=False,
-               storeDenseOutput=False,
+               storeDenseOutput=False, #DEPRECATED
                outputCloningWidth=0,
                outputCloningHeight=0,
                saveMasterCoincImages = 0,
-               temporalImp=gDefaultTemporalImp, #'py', 'simple' or 'cpp'
+               temporalImp='py', #'py', 'simple' or 'cpp'
+               spatialImp=getDefaultSPImp(),   #'py', 'cpp', or 'oldpy'
                computeTopDown = 0,
                nMultiStepPrediction = 0,
 
@@ -592,11 +589,12 @@ class CLARegion(PyRegion):
         kwargs[name] = (int(height), int(width))
 
     # Which FDR Temporal implementation?
+    FDRCSpatialClass = getSPClass(spatialImp)
     FDRTemporalClass = _getTPClass(temporalImp)
 
     # Pull out the spatial and temporal arguments automatically
     # These calls whittle down kwargs and create instance variables of CLARegion
-    sArgTuples = _buildArgs(FDRCSpatial2.FDRCSpatial2.__init__, self, kwargs)
+    sArgTuples = _buildArgs(FDRCSpatialClass.__init__, self, kwargs)
     tArgTuples = _buildArgs(FDRTemporalClass.__init__, self, kwargs)
 
     # Make a list of automatic spatial and temporal arg names for later use
@@ -624,9 +622,9 @@ class CLARegion(PyRegion):
     self.disableTemporal = disableTemporal
     self.orColumnOutputs = orColumnOutputs
     self.nCellsPerCol = nCellsPerCol  # Modified in initInNetwork
-    self.storeDenseOutput = storeDenseOutput
     self.coincidenceCount = self.coincidencesShape[0] * self.coincidencesShape[1]
     self.temporalImp = temporalImp
+    self.spatialImp = spatialImp
     self.computeTopDown = computeTopDown
     self.nMultiStepPrediction = nMultiStepPrediction
 
@@ -682,7 +680,7 @@ class CLARegion(PyRegion):
     # For inspector usage
     #from dbgp.client import brk; brk(port=9019)
     self._spatialSpec, self._temporalSpec, self._otherSpec = \
-                    _getAdditionalSpecs(temporalImp=self.temporalImp)
+                    _getAdditionalSpecs(spatialImp=self.spatialImp, temporalImp=self.temporalImp)
 
   #############################################################################
   #
@@ -894,14 +892,12 @@ class CLARegion(PyRegion):
     autoArgs.pop('seed')
 
 
-    self._sfdr = FDRCSpatial2.FDRCSpatial2(
+    FDRCSpatialClass = getSPClass(self.spatialImp)
+    self._sfdr =  FDRCSpatialClass(
       cloneMap=self._cloneMap,
       numCloneMasters=self._numCloneMasters,
       seed=self.spSeed,
       **autoArgs)
-
-    self._sfdr.setStoreDenseOutput(self.storeDenseOutput)
-
 
 
   #############################################################################
@@ -1114,13 +1110,6 @@ class CLARegion(PyRegion):
       if self.nMultiStepPrediction > 0:
         self._doPredict()
 
-      if self.computeTopDown:
-        (topDownOutput, spReconstructedInput) = self._doTopDownInfer(
-                                                topDownInput = rfOutput)
-        outputs['topDownOut'][:] = topDownOutput
-        if spReconstructedInput is not None:
-          outputs['spReconstructedIn'][:] = spReconstructedInput
-
       # Write the bottom up out to our node outputs only if we are doing
       # inference
       outputs['bottomUpOut'][:] = rfOutput.flat
@@ -1151,12 +1140,6 @@ class CLARegion(PyRegion):
     if rfInput is not None:
       # This is the normal case
       self._doSpatialInfer(rfInput, resetSignal, outputs)
-    else:
-      # rfInput == None + resetSignal == True is a special signal used when
-      # switching to inference mode or from sp to tp training
-      if (self.trainingStep == 'spatial') and resetSignal:
-        if hasattr(self._sfdr, 'finishLearning'):
-          self._sfdr.finishLearning()
 
     # We want to train the temporal pooler if it is not disabled and trainingStep
     # is set appropriately
@@ -1271,23 +1254,6 @@ class CLARegion(PyRegion):
       outStr = " ".join(["%d" % int(token) for token in outputNZ])
       print >>self._fpLogSPInput, output.size, outStr
 
-    if self._fpLogSPDense:
-      # Get the dense output (will only work if you've done storeDenseOutput)
-      try:
-        denseOutput = self._sfdr.getDenseOutput()
-        if len(denseOutput) == 0:
-          raise Exception("storeDenseOutput wasn't set in PY version")
-        denseOutput = numpy.array(denseOutput)
-        output = denseOutput.reshape(-1)
-        outputNZIds = denseOutput.nonzero()[0]
-        outputNZVals = denseOutput[outputNZIds]
-        outStrIds = " ".join(["%d" % int(token) for token in outputNZIds])
-        outStrVals = " ".join(["%d" % int(token) for token in outputNZVals])
-        print >>self._fpLogSPDense, output.size, outStrIds
-        print >>self._fpLogSPDense, output.size, outStrVals
-      except Exception:
-        print "WARNING: You must enable storing dense output in the SP using" \
-              "setStoreDenseOutput ."
     return self._rfOutput
 
   #############################################################################
@@ -1316,45 +1282,8 @@ class CLARegion(PyRegion):
         spTopDownIn = self._spatialPoolerOutput
 
       # Input reconstruction
-      if not self.disableSpatial:
-        self._multiStepInputPrediction[i,:] = self._sfdr.topDownCompute(spTopDownIn)
-      else:
-        self._multiStepInputPrediction[i,:] = spTopDownIn
+      self._multiStepInputPrediction[i,:] = spTopDownIn
 
-
-
-  #############################################################################
-  def _doTopDownInfer(self, topDownInput):
-    """
-    Do one iteration of top-down inference.
-
-    Parameters:
-    --------------------------------------------
-    tdInput:      Top-down input
-
-    retval:     (topDownOut, spReconstructedIn)
-                  topDownOut is the top down output computed from the topDown in
-                   of the level above us.
-                  spReconstructedIn is the top down output computed only from the SP,
-                    using it's current bottom-up output.
-
-    """
-
-    # Run through the TP's topdown compute
-    if self.disableTemporal:
-      tpTopDownOut = topDownInput
-    else:
-      tpTopDownOut = self._tfdr.topDownCompute(topDownInput)
-
-    # Run through the SP's topdown compute
-    if self.disableSpatial:
-      topDownOut = tpTopDownOut
-      spReconstructedIn = None
-    else:
-      spReconstructedIn = self._sfdr.topDownCompute(self._spatialPoolerOutput).copy()
-      topDownOut = self._sfdr.topDownCompute(tpTopDownOut)
-
-    return (topDownOut, spReconstructedIn)
 
   #############################################################################
   def _doSpatialInfer(self, rfInput, resetSignal, outputs):
@@ -1389,13 +1318,19 @@ class CLARegion(PyRegion):
         (self._iterations%self.saveMasterCoincImages == 0):
       self.saveMasterCoincidenceImage()
 
-    # Reset influences only hysteresis, if used
-    if resetSignal and self._sfdr is not None:
-      self._sfdr.reset()
 
-    self._sfdr.setStoreDenseOutput(True)
-    output = self._sfdr.compute(rfInput[0], learnFlag, inferFlag)
-    self._spatialPoolerOutput[:] = output[:]
+    if (self._sfdr.__class__ == FDRCSpatial2):
+      # Backwards compatability
+      output = self._sfdr.compute(rfInput[0], learnFlag, inferFlag)
+      self._spatialPoolerOutput[:] = output[:]
+
+    else:  
+      inputVector = numpy.array(rfInput[0]).astype('uint32')
+      outputVector = numpy.zeros(self._sfdr.getNumColumns()).astype('uint32')
+      self._sfdr.compute(inputVector, learnFlag, outputVector)
+      self._spatialPoolerOutput[:] = outputVector[:]
+
+
 
     # This is queried by the node inspectors to indicate that it is safe
     #  to ask for the variables they need.
@@ -1521,7 +1456,8 @@ class CLARegion(PyRegion):
     by the variosu components (spatialSpec, temporalSpec and otherSpec)
     """
     spec = cls.getBaseSpec()
-    s, t, o = _getAdditionalSpecs(temporalImp=gDefaultTemporalImp)
+    s, t, o = _getAdditionalSpecs(spatialImp=getDefaultSPImp(),
+                                  temporalImp=gDefaultTemporalImp)
     spec['parameters'].update(s)
     spec['parameters'].update(t)
     spec['parameters'].update(o)
@@ -1543,43 +1479,13 @@ class CLARegion(PyRegion):
     # babyIdx = nodeSet[0][0]
     # assert(babyIdx == 0)
 
-    if parameterName == 'sparseCoincidenceMatrix':
-      if not self._sfdr:
-        return None
-      return self._sfdr.cm
-    elif parameterName == 'spatialPoolerInput':
+    if parameterName == 'spatialPoolerInput':
       return list(self._spatialPoolerInput.reshape(-1))
     elif parameterName == 'spatialPoolerOutput':
       return list(self._spatialPoolerOutput)
     elif parameterName == 'spNumActiveOutputs':
       return len(self._spatialPoolerOutput.nonzero()[0])
-    elif parameterName == 'spOverlapDistribution':
-      if not self._sfdr:
-        return []
-      # Get the dense output (will only work if you've done storeDenseOutput)
-      try:
-        denseOutput = self._sfdr.getDenseOutput()
-        if len(denseOutput) == 0:
-          raise Exception("storeDenseOutput wasn't set in PY version")
-        denseOutput = numpy.array(denseOutput)
-      except Exception:
-        print "WARNING: You must enable storing dense output in the SP using" \
-              "setStoreDenseOutput."
-        return []
-      winnerIndices = numpy.array(self._spatialPoolerOutput).nonzero()[0]
-      overlaps = denseOutput[winnerIndices]
 
-      # Sort descending and convert to list...
-      overlaps = sorted(overlaps, reverse=True)
-
-      return overlaps
-    elif parameterName == "denseOutput":
-      # Must be a list, not a numpy array to make NuPIC happy...
-      denseOutput = self._sfdr.getDenseOutput()
-      if not isinstance(denseOutput, list):
-        assert isinstance(denseOutput, numpy.ndarray)
-        denseOutput = list(denseOutput)
-      return denseOutput
     elif parameterName == 'spOutputNonZeros':
       return [len(self._spatialPoolerOutput)] + \
               list(self._spatialPoolerOutput.nonzero()[0])
@@ -1654,10 +1560,6 @@ class CLARegion(PyRegion):
         self._doLearn(rfInput=None, resetSignal=True, outputs=None)
       self.inferenceMode = parameterValue
 
-    elif parameterName == 'storeDenseOutput':
-      if self._sfdr:
-        self._sfdr.setStoreDenseOutput(parameterValue)
-
     elif parameterName == "logPathSPInput":
       self.logPathSPInput = parameterValue
       # Close any existing log file
@@ -1717,181 +1619,6 @@ class CLARegion(PyRegion):
       self._allocateMultiStepPredictionVariables()
     else:
       raise Exception('Unknown parameter: ' + parameterName)
-
-  #############################################################################
-  #
-  # Methods to support inspectors and visualizations
-  #
-  #############################################################################
-
-  def saveMasterCoincidenceImage(self):
-    """Save an image of master coincidences to an image file. Currently the file
-    is saved to the sessions directory. Returns silently if spatial pooler
-    is disabled. Complains if cloning is turned off.
-    """
-
-    from PIL import Image
-
-    # Ensure spatial pooler is enabled
-    if self.disableSpatial: return
-
-    # Ensure cloning is enabled
-    if self.outputCloningWidth in (0, -1) or self.outputCloningHeight in (0, -1):
-      raise Exception("Can't save master coincidence image - cloning is" + \
-                      " turned off. Set saveMasterCoincImages to 0.")
-
-    # Image size: one pixel per coincidence input plus a one pixel border
-    coincWidth = 2*self.coincInputRadius+1
-    coincHeight = 2*self.coincInputRadius+1
-    width = (coincWidth + 1)*self.outputCloningWidth + 1
-    height = (coincHeight + 1)*self.outputCloningHeight + 1
-
-    # Make a blank image, in red (so we get some nice borders...)
-    fullImg = Image.new('RGB', (width, height), (255, 0, 0))
-
-    for rowNum in xrange(self.outputCloningHeight):
-      for colNum in xrange(self.outputCloningWidth):
-        masterNum = rowNum * self.outputCloningWidth + colNum
-
-        denseCoinc = numpy.zeros((coincHeight, coincWidth), 'uint8')
-        mlc = self.getSfdrMasterLearnedCoincidence(masterNum)
-        denseCoinc[mlc] = 255
-        img = Image.fromarray(denseCoinc, 'L')
-
-        fullImg.paste(
-          img,
-          (colNum * (coincWidth + 1) + 1,
-           rowNum * (coincHeight + 1) + 1)
-        )
-
-    path = ""
-    fname = os.path.join(path,'coincImage%04d'%(self._iterations)+'.png')
-    fullImg.save(fname)
-
-
-
-  #############################################################################
-  def getCoincCenters(self):
-    """Return the centers of all coincidences of the SP.
-
-    @return coincCenters       List of the coincidence centers.
-                               Each element is a tuple: (y, x)
-    """
-
-    return FDRCSpatial2.FDRCSpatial2.computeCoincCenters(
-      self.inputShape, self.coincidencesShape, self.inputBorder)
-
-
-  #############################################################################
-  def getSfdrLearnedRow(self, i):
-    """Get a row from the FDR Spatial's learned coincidence matrix.
-
-    This should be fairly fast, even for the CPP version.
-
-    This function is 'public' since it's used by the CoincsTab inspector.
-
-    @param  i                  The row to get.
-    @return learnedCmRow       A row from the coincidence matrix; will return
-                               None if the spatial pooler hasn't been
-                               initialized yet.
-    """
-    if self._sfdr is None:
-      return None, None
-
-    # Try to use optimized version first...
-    if hasattr(self._sfdr, 'getSparseCoincidence'):
-      # C++ version...
-      learnedRowSparse, _ = self._sfdr.getSparseCoincidence(i, True)
-      learnedRow = numpy.zeros(self.inputShape[0] * self.inputShape[1], 'bool')
-      learnedRow[learnedRowSparse] = True
-      return learnedRow
-    elif hasattr(self._sfdr, 'getLearnedCmRowAsDenseArray'):
-      # Py version (at the moment, C++ has this, but it doesn't work)...
-      learnedRow = self._sfdr.getLearnedCmRowAsDenseArray(i)
-      return learnedRow
-    else:
-      # Only works with old-style training, so not a good idea...
-      assert False, "Untested code to support old nodes"
-
-      _, learnedData = self._nodeRef.getSfdrRow(i)
-      learnedData = (learnedData >= self._nodeRef.getSfdrHistogramThreshold())
-      return learnedData
-
-
-  #############################################################################
-  def getSfdrMasterLearnedCoincidence(self, masterNum):
-    """Return the learned coincidence for a given master.
-
-    This coincidence will be (2*coincInputRadius + 1) by (2*coincInputRadius + 1)
-    big.  The coincidence is returned sparsely (like numpy.where does).  You can
-    get the actual coincidence by doing:
-        denseCoinc = numpy.zeros(((2*coincInputRadius + 1),
-                                  (2*coincInputRadius + 1))
-                                 'bool')
-        mlc = fdrcSpatial.getSfdrMasterLearnedCoincidence(masterNum)
-        denseCoinc[mlc] = True
-
-    @param  masterNum           The master number to look at.
-    @return learnedCoincidence  A learned coincidence, in numpy.where() format.
-    """
-
-    return self._sfdr.getMasterLearnedCoincidence(masterNum)
-
-
-  #############################################################################
-  def getSfdrMasterHistogram(self, masterNum):
-    """Return the histogram for a given master.
-
-    This coincidence will be (2*coincInputRadius + 1) by (2*coincInputRadius + 1)
-    big.  The coincidence is returned densely.
-
-    @param  masterNum           The master number to look at.
-    @return histogram           A histogram.
-    """
-
-    return self._sfdr.getMasterHistogram(masterNum)
-
-
-  #############################################################################
-  def getSfdrRow(self, i):
-    """Get a row from the FDR Spatial's coincidence matrix and input histogram.
-
-    This should be fairly fast, even for the CPP version.
-
-    This function is 'public' since it's used by the CoincsTab inspector.
-
-    @param  i                  The row to get.
-    @return cmRow              A row from the coincidence matrix; will return
-                               None if the spatial pooler hasn't been
-                               initialized yet.
-    @return inputHistogramRow  A row from the input histogram; also None if not
-                               initted yet.
-    """
-    if self._sfdr is None:
-      return None, None
-
-    # Try to use optimized version first...
-    if hasattr(self._sfdr, 'getCmRowAsDenseArray'):
-      cmRow = self._sfdr.getCmRowAsDenseArray(i)
-    else:
-      cmRow = self._sfdr.cm.getRow(i)
-
-    # Try to use optimized version first...
-    if hasattr(self._sfdr, 'getInputHistogramRowAsDenseArray'):
-      ihRow = self._sfdr.getInputHistogramRowAsDenseArray(i)
-    else:
-      ihRow = self._sfdr.inputHistogram.getRow(i)
-
-    return cmRow, ihRow
-
-  #############################################################################
-  def getSfdrHistogramThreshold(self):
-    """Return the histogram threshold from our spatial pooler.
-
-    @return histogramThreshold  Our histogram threshold.
-    """
-
-    return self._sfdr.histogramThreshold
 
 
   #############################################################################
@@ -2002,9 +1729,6 @@ class CLARegion(PyRegion):
     # Support for legacy networks
     if 'statelessMode' not in state:
       state['statelessMode'] = False
-
-    if not hasattr(self, 'storeDenseOutput'):
-      self.storeDenseOutput = False
 
     self.__dict__.update(state)
     self._loaded = True
