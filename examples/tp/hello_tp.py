@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # ----------------------------------------------------------------------
 # Numenta Platform for Intelligent Computing (NuPIC)
-# Copyright (C) 2013, Numenta, Inc.  Unless you have purchased from
-# Numenta, Inc. a separate commercial license for this software code, the
+# Copyright (C) 2013, Numenta, Inc.  Unless you have an agreement
+# with Numenta, Inc., for a separate license for this software code, the
 # following terms and conditions apply:
 #
 # This program is free software: you can redistribute it and/or modify
@@ -40,7 +40,7 @@ PLEASE READ THROUGH THE CODE COMMENTS - THEY EXPLAIN THE OUTPUT IN DETAIL
 import numpy
 
 # here we choose TP implementation: (uncomment one only)
-# This is the class correspondingn to the C++ optimized Temporal Pooler (default)
+# This is the class corresponding to the C++ optimized Temporal Pooler (default)
 from nupic.research.TP10X2 import TP10X2 as TP
 # This is simple implementation in Python
 #from nupic.research.TP import TP as TP
